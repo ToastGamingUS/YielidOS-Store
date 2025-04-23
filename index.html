@@ -1,0 +1,99 @@
+<!DOCTYPE html><html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>YielidOS Store</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; background: #f2f2f2; }
+    .app-card { border: 1px solid #ccc; border-radius: 12px; padding: 16px; background: white; margin-bottom: 12px; width: 640px; }
+    .app-thumbnail { width: 640px; height: 360px; object-fit: cover; }
+    .app-title { font-size: 1.5em; margin: 10px 0; }
+    .btn { padding: 10px 20px; background: #0066ff; color: white; border: none; border-radius: 6px; cursor: pointer; }
+    #apps { margin-top: 30px; }
+  </style>
+</head>
+<body>
+  <h1>YielidOS Store</h1>
+  <input type="file" id="yuaUpload" accept=".yua">
+  <button onclick="handleUpload()" class="btn">Create New App</button>  <div id="apps"></div>  <script>
+    const GITHUB_TOKEN = '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';
+    const REPO_OWNER = 'ToastGamingUS';
+    const REPO_NAME = 'YielidOS-Store';
+
+    async function handleUpload() {
+      const file = document.getElementById('yuaUpload').files[0];
+      if (!file) return alert('Select a .yua file');
+
+      const zip = await JSZip.loadAsync(file);
+
+      const contentHtml = await zip.file('content.html')?.async('string');
+      const metadataRaw = await zip.file('metadata.json')?.async('string');
+
+      if (!contentHtml || !metadataRaw) return alert('Missing content.html or metadata.json');
+
+      const metadata = JSON.parse(metadataRaw);
+      const appTitle = metadata['app.title'];
+      const appThumb = metadata['app.thumbnail'];
+
+      if (!appTitle || !appThumb) return alert('metadata.json missing app.title or app.thumbnail');
+
+      // Push app title to apps.txt
+      await pushToGitHub('apps.txt', `\n${appTitle}`);
+
+      // Push data to dataapps.txt
+      await pushToGitHub('dataapps.txt', `\n${JSON.stringify({ title: appTitle, thumbnail: appThumb, content: contentHtml })}`);
+
+      alert('App uploaded successfully! Reload to see in list.');
+    }
+
+    async function pushToGitHub(path, newContent) {
+      const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}`;
+      const headers = { Authorization: `token ${GITHUB_TOKEN}` };
+
+      const { data } = await axios.get(url, { headers });
+      const content = atob(data.content) + newContent;
+
+      await axios.put(url, {
+        message: 'Update via YielidOS Store',
+        content: btoa(unescape(encodeURIComponent(content))),
+        sha: data.sha
+      }, { headers });
+    }
+
+    async function loadApps() {
+      const res = await fetch(`https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/dataapps.txt`);
+      const raw = await res.text();
+      const entries = raw.trim().split(/\n+/).map(line => {
+        try { return JSON.parse(line); } catch (e) { return null; }
+      }).filter(Boolean);
+
+      const appsDiv = document.getElementById('apps');
+      for (const app of entries) {
+        const div = document.createElement('div');
+        div.className = 'app-card';
+        div.innerHTML = `
+          <img src="${app.thumbnail}" class="app-thumbnail">
+          <div class="app-title">${app.title}</div>
+          <button class="btn" onclick='downloadApp(${JSON.stringify(app)})'>Download</button>
+        `;
+        appsDiv.appendChild(div);
+      }
+    }
+
+    function downloadApp(app) {
+      const zip = new JSZip();
+      zip.file("metadata.json", JSON.stringify({ "app.title": app.title, "app.thumbnail": app.thumbnail }));
+      zip.file("content.html", app.content);
+      zip.generateAsync({ type: "blob" })
+        .then(content => {
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(content);
+          link.download = `${app.title}.yua`;
+          link.click();
+        });
+    }
+
+    loadApps();
+  </script></body>
+</html>
